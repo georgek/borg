@@ -733,29 +733,38 @@ The Git directory is not removed."
   "Insert information about drones that are updated in the index.
 Formatting is according to the commit message conventions."
   (interactive)
-  (let* ((alist (borg-updated-drones))
-         (count (length alist))
+  (let* ((alist (borg--drone-states))
          (width (apply #'max (mapcar (lambda (e) (length (car e))) alist)))
          (align (cl-member-if (lambda (e) (string-match-p "\\`v[0-9]" (cdr e)))
                               alist))
          (format (format "Update %%-%is to %%s%%s\n" width)))
-    (when (> count 1)
+    (when (> (length alist) 1)
       (insert (format "Update %-s drones\n\n" (length alist))))
-    (pcase-dolist (`(,drone . ,version) alist)
-      (insert (format
-               format drone
-               (if (and align (string-match-p "\\`[0-9]" version)) " " "")
+    (pcase-dolist (`(,drone ,state ,version) alist)
+      (insert
+       (format (pcase state
+                 ("A" "Add %s")
+                 ("M" format)
+                 ("D" "Remove %s"))
+               drone
+               (and version
+                    (if (and align (string-match-p "\\`[0-9]" version)) " " ""))
                version)))))
 
-(defun borg-updated-drones ()
+(defun borg--drone-states ()
   (let ((default-directory borg-user-emacs-directory))
     (mapcar
-     (lambda (module)
-       (let ((default-directory (expand-file-name module)))
-         (cons (file-name-nondirectory module)
-               (car (process-lines "git" "describe" "--tags" "--always")))))
+     (lambda (line)
+       (pcase-let* ((`(,state ,module) (split-string line "\t")))
+         (list module state
+               (and (equal state "M")
+                    (let ((default-directory (expand-file-name module)))
+                      (if (file-directory-p default-directory)
+                          (car (process-lines
+                                "git" "describe" "--tags" "--always"))
+                        "REMOVED"))))))
      (process-lines
-      "git" "diff-index" "--name-only" "--cached" "HEAD" "--" "lib/"))))
+      "git" "diff-index" "--name-status" "--cached" "HEAD" "--" "lib/"))))
 
 ;;; Internal Utilities
 
